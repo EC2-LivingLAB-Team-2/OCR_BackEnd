@@ -13,43 +13,70 @@ API_KEY = os.getenv("API_KEY")
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 # OCR + 상품명 분류
-@app.route('/parse-ingredients', methods=['POST'])
+@app.route('/api/v1/parse-ingredients', methods=['POST'])
 def parse_ingredients():
-    reader = easyocr.Reader(['ko'])
-    result = reader.readtext('image.png')  # 실제 사용할 이미지 파일 경로
-    text = " ".join([d[1] for d in result])
+    # form-data에서 이미지 받기
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image file provided'}), 400
 
-    content = f"""
-    아래는 OCR로 인식된 텍스트입니다. 상품명이 정확하지 않을 수 있으므로, 유사 발음과 일반적인 쇼핑 품목명을 기준으로 보정한 후, 상품명과 수량을 추출하고 각 상품을 아래의 음식 카테고리 중 하나로 분류해 주세요.
+    image_file = request.files['image']
+    image_path = 'temp_image.png'
+    image_file.save(image_path)
 
-    ✅ 출력 형식은 다음과 같아야 합니다:
-    [[상품명, 수량, 카테고리], [상품명, 수량, 카테고리], ...]
+    try:
+        # OCR
+        reader = easyocr.Reader(['ko'])
+        result = reader.readtext(image_path)
+        text = " ".join([d[1] for d in result])
 
-    ❗ 반드시 지켜야 할 조건:
-    - 수량이 명시되지 않으면 1로 간주하세요.
-    - 단위(개, 팩 등)는 생략하고 숫자만 포함하세요.
-    - 상품명이 너무 불분명하거나 카테고리 분류가 어렵다면 제외하세요.
-    - 설명 등 다른 텍스트는 절대 포함하지 마세요.
+        # 프롬프트 생성
+        content = f"""
+        아래는 OCR로 인식된 텍스트입니다. 상품명이 정확하지 않을 수 있으므로, 유사 발음과 일반적인 쇼핑 품목명을 기준으로 보정한 후, 상품명과 수량을 추출하고 각 상품을 아래의 음식 카테고리 중 하나로 분류해 주세요.
 
-    📦 카테고리 목록:
-    - 육류, 해산물, 음료, 과일, 채소, 유제품, 곡류/가공식품, 조미료/소스, 냉동식품, 간식, 베이커리, 유아식품
+        ✅ 출력 형식은 다음과 같아야 합니다:
+        [[상품명, 수량, 카테고리], [상품명, 수량, 카테고리], ...]
 
-    텍스트:
-    {text}
-    """
+        ❗ 반드시 지켜야 할 조건:
+        - 수량이 명시되지 않으면 1로 간주하세요.
+        - 단위(개, 팩 등)는 생략하고 숫자만 포함하세요.
+        - 상품명이 너무 불분명하거나 카테고리 분류가 어렵다면 제외하세요.
+        - 설명 등 다른 텍스트는 절대 포함하지 마세요.
 
-    response = requests.post(GROQ_API_URL, headers={
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {API_KEY}"
-    }, json={
-        "model": "llama-3.3-70b-versatile",
-        "messages": [{"role": "user", "content": content}]
-    })
+        📦 카테고리 목록:
+        - 육류, 해산물, 음료, 과일, 채소, 유제품, 곡류/가공식품, 조미료/소스, 냉동식품, 간식, 베이커리, 유아식품
 
-    if response.status_code == 200:
-        return jsonify(response.json()['choices'][0]['message']['content'])
-    else:
-        return jsonify({"error": response.text}), response.status_code
+        텍스트:
+        {text}
+        """
+
+        # Groq API 호출
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {API_KEY}"
+        }
+        payload = {
+            "model": "llama-3.3-70b-versatile",
+            "messages": [{"role": "user", "content": content.strip()}]
+        }
+        response = requests.post(GROQ_API_URL, headers=headers, json=payload)
+
+        # 응답 반환
+        if response.status_code == 200:
+            return jsonify({
+                                "status": 200,
+                                "data": response.json()['choices'][0]['message']['content']
+                            })
+        else:
+            return jsonify({
+                                "status": response.status_code,
+                                "data": {
+                                    "error": response.text
+                                }
+                            })
+    finally:
+        # 이미지 삭제
+        if os.path.exists(image_path):
+            os.remove(image_path)
 
 
 # 레시피 추천
