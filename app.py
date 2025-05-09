@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS 
 import requests
 import os
@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 import easyocr
 import json
 from datetime import datetime
-import ast
+import re
 
 app = Flask(__name__)
 CORS(app)
@@ -65,22 +65,29 @@ def parse_ingredients():
             "messages": [{"role": "user", "content": content.strip()}]
         }
         response = requests.post(GROQ_API_URL, headers=headers, json=payload)
-
         if response.status_code == 200:
             raw_data = response.json()['choices'][0]['message']['content']
-            parsed_list = ast.literal_eval(raw_data)  
 
-            return jsonify({
-                                "status": 200,
-                                "data": parsed_list
-                            })
+            # 상품명, 수량, 카테고리, 날짜에 맞는 형식으로 정규 표현식 적용
+            pattern = r'["“](.*?)[”"]\s*,\s*(\d+)\s*,\s*["“](.*?)["”]'
+            matches = re.findall(pattern, raw_data)
+
+            # 날짜 추가
+            parsed_list = [[item[0], int(item[1]), item[2], current_time] for item in matches]
+
+            response = make_response(jsonify({
+                "status": 200,
+                "data": parsed_list
+            }))
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            return response
         else:
             return jsonify({
-                                "status": response.status_code,
-                                "data": {
-                                    "error": response.text
-                                }
-                            })
+                "status": response.status_code,
+                "data": {
+                    "error": response.text
+                }
+            })
     finally:
         # 이미지 삭제
         if os.path.exists(image_path):
