@@ -4,6 +4,7 @@ import requests
 import os
 from dotenv import load_dotenv
 import easyocr
+import json
 
 app = Flask(__name__)
 CORS(app)
@@ -80,13 +81,18 @@ def parse_ingredients():
 
 
 # 레시피 추천
-@app.route('/recommend-recipe', methods=['POST'])
+@app.route('/api/v1/recommend-recipe', methods=['POST'])
 def recommend_recipe():
     data = request.get_json()
     ingredients = data.get("ingredients", [])
 
     if not ingredients:
-        return jsonify({"error": "No ingredients provided"}), 400
+        return jsonify({
+                            "status": 400,
+                            "data": {
+                                "error": "No ingredients provided"
+                            }
+                        })
 
     ingredient_str = ", ".join([f"{name} {qty}" for name, qty in ingredients])
 
@@ -99,13 +105,16 @@ def recommend_recipe():
     - 필요한 재료 목록
     - 간단한 조리 방법 설명 (3줄 이하)
     - 사용자 보유 재료에 기반하여 최대한 충족되는 요리
-    - 조리 방법을 자세히 작성
 
-    출력 형식:
-    음식명: ...
-    필요한 재료: ...
-    조리 방법: ...
-    (한국어로 작성)
+    ✅ 출력 형식은 반드시 아래의 JSON 구조를 따르세요 (설명 없이 JSON만 반환):
+
+    {{
+    "name": "요리 이름",
+    "ingredients": ["재료1", "재료2", ...],
+    "instructions": "조리 방법은 명확하고 구체적으로 작성"
+    }}
+
+    답변은 반드시 한국어로 작성해 주세요.
     """
 
     response = requests.post(GROQ_API_URL, headers={
@@ -117,9 +126,32 @@ def recommend_recipe():
     })
 
     if response.status_code == 200:
-        return jsonify(response.json()['choices'][0]['message']['content'])
+        # 응답에서 코드 블록 제거하기
+        response_content = response.json()['choices'][0]['message']['content']
+        response_content = response_content.strip('```json\n').strip('```')
+
+        try:
+            # 응답 내용을 JSON으로 파싱
+            recipe_data = json.loads(response_content)
+            return jsonify({
+                "status": 200,
+                "data": recipe_data
+            })
+        except json.JSONDecodeError:
+            return jsonify({
+                "status": 500,
+                "data": {
+                    "error": "Response format error"
+                }
+            })
+
     else:
-        return jsonify({"error": response.text}), response.status_code
+        return jsonify({
+            "status": response.status_code,
+            "data": {
+                "error": response.text
+            }
+        })
 
 
 if __name__ == '__main__':
