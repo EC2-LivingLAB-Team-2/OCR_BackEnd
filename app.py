@@ -5,6 +5,8 @@ import os
 from dotenv import load_dotenv
 import easyocr
 import json
+from datetime import datetime
+import ast
 
 app = Flask(__name__)
 CORS(app)
@@ -30,12 +32,15 @@ def parse_ingredients():
         result = reader.readtext(image_path)
         text = " ".join([d[1] for d in result])
 
+        # 현재 날짜와 시간 생성
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
         # 프롬프트 생성
         content = f"""
         아래는 OCR로 인식된 텍스트입니다. 상품명이 정확하지 않을 수 있으므로, 유사 발음과 일반적인 쇼핑 품목명을 기준으로 보정한 후, 상품명과 수량을 추출하고 각 상품을 아래의 음식 카테고리 중 하나로 분류해 주세요.
 
         ✅ 출력 형식은 다음과 같아야 합니다:
-        [[상품명, 수량, 카테고리], [상품명, 수량, 카테고리], ...]
+        [["상품명", 수량, "카테고리", "{current_time}"], ...]
 
         ❗ 반드시 지켜야 할 조건:
         - 수량이 명시되지 않으면 1로 간주하세요.
@@ -61,11 +66,13 @@ def parse_ingredients():
         }
         response = requests.post(GROQ_API_URL, headers=headers, json=payload)
 
-        # 응답 반환
         if response.status_code == 200:
+            raw_data = response.json()['choices'][0]['message']['content']
+            parsed_list = ast.literal_eval(raw_data)  
+
             return jsonify({
                                 "status": 200,
-                                "data": response.json()['choices'][0]['message']['content']
+                                "data": parsed_list
                             })
         else:
             return jsonify({
@@ -99,20 +106,23 @@ def recommend_recipe():
     prompt = f"""
     다음은 사용자가 현재 가지고 있는 재료 목록입니다: {ingredient_str}
 
-    이 재료 중 일부 또는 전부를 활용하여 만들 수 있는 요리법을 1개 추천해 주세요. 각 레시피는 다음 조건을 따라 주세요:
+    이 재료 중 일부 또는 전부를 활용하여 만들 수 있는 요리법을 10개 추천해 주세요. 각 레시피는 다음 조건을 따라 주세요:
 
     - 레시피 이름
     - 필요한 재료 목록
-    - 간단한 조리 방법 설명 (3줄 이하)
-    - 사용자 보유 재료에 기반하여 최대한 충족되는 요리
+    - 명확하고 구체적인 조리 방법
+    - 사용자 보유 재료를 최대한 활용한 요리
 
-    ✅ 출력 형식은 반드시 아래의 JSON 구조를 따르세요 (설명 없이 JSON만 반환):
+    ✅ 출력 형식은 반드시 아래의 JSON 배열 구조를 따르세요 (설명 없이 JSON만 반환):
 
+    [
     {{
-    "name": "요리 이름",
-    "ingredients": ["재료1", "재료2", ...],
-    "instructions": "조리 방법은 명확하고 구체적으로 작성"
-    }}
+        "name": "요리 이름",
+        "ingredients": ["재료1", "재료2", ...],
+        "instructions": "조리 방법은 명확하고 구체적으로 작성"
+    }},
+    ...
+    ]
 
     답변은 반드시 한국어로 작성해 주세요.
     """
