@@ -62,9 +62,17 @@ def parse_ingredients():
 
         # 응답 반환
         if response.status_code == 200:
-            return jsonify({"result": response.json()['choices'][0]['message']['content']})
+            return jsonify({
+                                "status": 200,
+                                "data": response.json()['choices'][0]['message']['content']
+                            })
         else:
-            return jsonify({"error": response.text}), response.status_code
+            return jsonify({
+                                "status": response.status_code,
+                                "data": {
+                                    "error": response.text
+                                }
+                            })
     finally:
         # 이미지 삭제
         if os.path.exists(image_path):
